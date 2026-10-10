@@ -1,0 +1,57 @@
+
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#101820">
+<title>離線音樂播放器</title>
+<style>
+body{font-family:Arial,sans-serif;background:#101820;color:white;margin:0;padding:24px}
+main{max-width:520px;margin:auto}
+button,input{font-size:16px;margin:10px 0}
+button{padding:12px 20px;border:0;border-radius:10px;background:#00c8b4;color:#001a18}
+audio{width:100%;margin-top:20px}
+</style>
+</head>
+<body>
+<main>
+<h1>🎵 離線音樂播放器</h1>
+<p>選擇手機裡的 MP3，即可播放。</p>
+<input id="files" type="file" accept="audio/*" multiple>
+<ul id="list"></ul>
+<audio id="player" controls></audio>
+<p id="status">尚未選擇音樂</p>
+</main>
+<script>
+const files=document.getElementById('files');
+const list=document.getElementById('list');
+const player=document.getElementById('player');
+const status=document.getElementById('status');
+let urls=[];
+files.addEventListener('change',()=>{
+  urls.forEach(URL.revokeObjectURL);
+  urls=[];
+  list.replaceChildren();
+  const selected=Array.from(files.files);
+  selected.forEach(file=>{
+    const url=URL.createObjectURL(file);
+    urls.push(url);
+    const li=document.createElement('li');
+    const button=document.createElement('button');
+    button.textContent='播放 '+file.name;
+    button.onclick=()=>{
+      player.src=url;
+      player.play();
+      status.textContent='正在播放：'+file.name;
+    };
+    li.appendChild(button);
+    list.appendChild(li);
+  });
+  status.textContent=selected.length
+    ?'已載入 '+selected.length+' 首音樂'
+    :'尚未選擇音樂';
+});
+</script>
+</body>
+</html>
