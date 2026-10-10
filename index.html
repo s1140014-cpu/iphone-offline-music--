@@ -7,51 +7,168 @@
 <meta name="theme-color" content="#101820">
 <title>離線音樂播放器</title>
 <style>
-body{font-family:Arial,sans-serif;background:#101820;color:white;margin:0;padding:24px}
-main{max-width:520px;margin:auto}
-button,input{font-size:16px;margin:10px 0}
-button{padding:12px 20px;border:0;border-radius:10px;background:#00c8b4;color:#001a18}
-audio{width:100%;margin-top:20px}
+body{font-family:Arial,sans-serif;background:#101820;color:#fff;margin:0;padding:24px}
+main{max-width:600px;margin:auto}
+button,input{font-size:16px;margin:8px 0}
+button{padding:10px 14px;border:0;border-radius:8px;background:#00c8b4;color:#001a18}
+li{margin:12px 0;overflow-wrap:anywhere}
+audio{width:100%;margin:16px 0}
+#status{color:#9fe9df}
 </style>
 </head>
 <body>
 <main>
 <h1>🎵 離線音樂播放器</h1>
-<p>選擇手機裡的 MP3，即可播放。</p>
-<input id="files" type="file" accept="audio/*" multiple>
-<ul id="list"></ul>
+<p>選取 MP3 後，歌曲會保存到這個瀏覽器。</p>
+<input id="files" type="file" accept="audio/mpeg,audio/*" multiple>
+<p id="status">正在初始化……</p>
 <audio id="player" controls></audio>
-<p id="status">尚未選擇音樂</p>
+<h2>我的音樂</h2>
+<ul id="list"></ul>
 </main>
+
 <script>
-const files=document.getElementById('files');
-const list=document.getElementById('list');
-const player=document.getElementById('player');
-const status=document.getElementById('status');
-let urls=[];
-files.addEventListener('change',()=>{
-  urls.forEach(URL.revokeObjectURL);
-  urls=[];
-  list.replaceChildren();
-  const selected=Array.from(files.files);
-  selected.forEach(file=>{
-    const url=URL.createObjectURL(file);
-    urls.push(url);
-    const li=document.createElement('li');
-    const button=document.createElement('button');
-    button.textContent='播放 '+file.name;
-    button.onclick=()=>{
-      player.src=url;
-      player.play();
-      status.textContent='正在播放：'+file.name;
+const statusEl = document.getElementById("status");
+const filesEl = document.getElementById("files");
+const listEl = document.getElementById("list");
+const player = document.getElementById("player");
+let db;
+let currentUrl = null;
+
+function status(message) {
+  statusEl.textContent = message;
+}
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("OfflineMusicLibrary", 1);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains("songs")) {
+        database.createObjectStore("songs", { keyPath: "id" });
+      }
     };
-    li.appendChild(button);
-    list.appendChild(li);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
   });
-  status.textContent=selected.length
-    ?'已載入 '+selected.length+' 首音樂'
-    :'尚未選擇音樂';
+}
+
+function allSongs() {
+  return new Promise((resolve, reject) => {
+    const request = db.transaction("songs", "readonly")
+      .objectStore("songs").getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function saveSong(song) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("songs", "readwrite");
+    tx.objectStore("songs").put(song);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+function deleteSong(id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("songs", "readwrite");
+    tx.objectStore("songs").delete(id);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function playSong(song) {
+  if (currentUrl) URL.revokeObjectURL(currentUrl);
+  currentUrl = URL.createObjectURL(song.data);
+  player.src = currentUrl;
+  player.load();
+  try {
+    await player.play();
+    status("正在播放：" + song.name);
+  } catch {
+    status("歌曲已載入，請按播放器的播放鍵。");
+  }
+}
+
+async function renderSongs() {
+  const songs = await allSongs();
+  listEl.replaceChildren();
+
+  if (!songs.length) {
+    const li = document.createElement("li");
+    li.textContent = "尚未保存歌曲。請選取 MP3。";
+    listEl.appendChild(li);
+    return;
+  }
+
+  for (const song of songs) {
+    const li = document.createElement("li");
+    const play = document.createElement("button");
+    play.textContent = "播放";
+    play.onclick = () => playSong(song);
+
+    const remove = document.createElement("button");
+    remove.textContent = "刪除";
+    remove.style.marginLeft = "8px";
+    remove.onclick = async () => {
+      if (!confirm("確定刪除 " + song.name + "？")) return;
+      await deleteSong(song.id);
+      await renderSongs();
+      status("歌曲已從播放器資料庫刪除。");
+    };
+
+    const name = document.createElement("span");
+    name.textContent = " " + song.name + " ";
+
+    li.append(play, name, remove);
+    listEl.appendChild(li);
+  }
+}
+
+filesEl.addEventListener("change", async () => {
+  try {
+    const files = Array.from(filesEl.files || []);
+    for (const file of files) {
+      if (!file.type.startsWith("audio/") &&
+          !/\.(mp3|m4a|wav|aac|flac|ogg)$/i.test(file.name)) {
+        continue;
+      }
+      await saveSong({
+        id: file.name + "-" + file.size + "-" + file.lastModified,
+        name: file.name,
+        data: file,
+        savedAt: Date.now()
+      });
+    }
+    await renderSongs();
+    status("匯入完成，歌曲已保存到此瀏覽器。");
+  } catch (error) {
+    status("保存失敗：" + error.message +
+      "。請檢查手機儲存空間及瀏覽器設定。");
+  } finally {
+    filesEl.value = "";
+  }
 });
+
+async function start() {
+  try {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js")
+        .then(() => status("離線快取已啟用，正在讀取歌曲……"))
+        .catch(() => status("歌曲保存可用；離線快取註冊失敗，請檢查網路。"));
+    }
+    db = await openDatabase();
+    await renderSongs();
+    status("播放器就緒。已保存的歌曲會保留在此瀏覽器。");
+  } catch (error) {
+    status("初始化失敗：" + error.message);
+  }
+}
+start();
 </script>
 </body>
 </html>
